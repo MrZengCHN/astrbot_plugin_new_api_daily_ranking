@@ -5,8 +5,10 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 
 RANKING_TMPL = '''
-<html><body style="margin: 0; padding: 0; display: inline-block;">
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px 40px 20px; background: #fff; min-width: 600px;">
+<html><head><style>
+html, body { margin: 0; padding: 0; width: fit-content; height: fit-content; }
+</style></head><body>
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px 40px 20px; background: #fff; width: 700px;">
   <h2 style="margin: 0 0 4px 0; font-size: 24px; color: #333;">用户消耗排行</h2>
   <p style="margin: 0 0 20px 0; font-size: 14px; color: #888;">{{ date }} &nbsp; 总计：${{ "%.2f"|format(total_usd) }}</p>
   <div style="border-left: 3px solid #333; padding-left: 0;">
@@ -14,7 +16,7 @@ RANKING_TMPL = '''
     <div style="display: flex; align-items: center; margin-bottom: 8px; padding-left: 12px;">
       <span style="width: 100px; font-size: 14px; color: #555; flex-shrink: 0; text-align: right; padding-right: 12px;">{{ item.username }}</span>
       <div style="height: 28px; background: {{ colors[loop.index0 % colors|length] }}; width: {{ item.percent }}%; border-radius: 0 4px 4px 0; min-width: 4px;"></div>
-      <span style="margin-left: 8px; font-size: 14px; color: {{ colors[loop.index0 % colors|length] }}; font-weight: 500;">${{ "%.2f"|format(item.usd) }}</span>
+      <span style="margin-left: 8px; font-size: 14px; color: {{ colors[loop.index0 % colors|length] }}; font-weight: 500; white-space: nowrap;">${{ "%.2f"|format(item.usd) }}</span>
     </div>
     {% endfor %}
   </div>
@@ -81,7 +83,7 @@ class NewApiDailyRankingPlugin(Star):
             "total_usd": total_usd,
             "items": render_items,
             "colors": BAR_COLORS,
-        })
+        }, options={"viewport": {"width": 780, "height": 100}})
 
     def _format_user_ranking(self, username: str, date: str, items: list) -> str:
         for item in items:
