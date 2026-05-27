@@ -6,9 +6,11 @@ from astrbot.api import logger, AstrBotConfig
 
 RANKING_TMPL = '''
 <html><head><style>
-html, body { margin: 0; padding: 0; width: fit-content; height: fit-content; }
+*, *::before, *::after { box-sizing: border-box; }
+html { height: auto; min-height: 0; }
+body { margin: 0; padding: 0; height: auto; min-height: 0; overflow: hidden; }
 </style></head><body>
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px 40px 20px; background: #fff; width: 700px;">
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px 40px 20px; background: #fff;">
   <h2 style="margin: 0 0 4px 0; font-size: 24px; color: #333;">用户消耗排行</h2>
   <p style="margin: 0 0 20px 0; font-size: 14px; color: #888;">{{ date }} &nbsp; 总计：${{ "%.2f"|format(total_usd) }}</p>
   <div style="border-left: 3px solid #333; padding-left: 0;">
@@ -83,7 +85,7 @@ class NewApiDailyRankingPlugin(Star):
             "total_usd": total_usd,
             "items": render_items,
             "colors": BAR_COLORS,
-        }, options={"viewport": {"width": 780, "height": 100}})
+        })
 
     def _format_user_ranking(self, username: str, date: str, items: list) -> str:
         for item in items:
