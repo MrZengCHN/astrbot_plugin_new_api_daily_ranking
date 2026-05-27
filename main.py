@@ -5,7 +5,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 
 RANKING_TMPL = '''
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px 40px; background: #fff; min-width: 600px;">
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px 40px 16px; background: #fff; min-width: 600px; display: inline-block;">
   <h2 style="margin: 0 0 4px 0; font-size: 24px; color: #333;">用户消耗排行</h2>
   <p style="margin: 0 0 20px 0; font-size: 14px; color: #888;">{{ date }} &nbsp; 总计：${{ "%.2f"|format(total_usd) }}</p>
   <div style="border-left: 3px solid #333; padding-left: 0;">
