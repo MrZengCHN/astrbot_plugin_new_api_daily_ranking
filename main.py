@@ -10,13 +10,13 @@ RANKING_TMPL = '''
 html { height: auto; min-height: 0; }
 body { margin: 0; padding: 0; height: auto; min-height: 0; overflow: hidden; }
 </style></head><body>
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px 40px 20px; background: #fff;">
-  <h2 style="margin: 0 0 4px 0; font-size: 24px; color: #333;">用户消耗排行</h2>
-  <p style="margin: 0 0 20px 0; font-size: 14px; color: #888;">{{ date }} &nbsp; 总计：${{ "%.2f"|format(total_usd) }}</p>
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px 40px 16px; background: #fff;">
+  <h2 style="margin: 0 0 4px 0; font-size: 24px; line-height: 30px; color: #333;">用户消耗排行</h2>
+  <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 18px; color: #888;">{{ date }} &nbsp; 总计：${{ "%.2f"|format(total_usd) }}</p>
   <div style="border-left: 3px solid #333; padding-left: 0;">
     {% for item in items %}
-    <div style="display: flex; align-items: center; margin-bottom: 8px; padding-left: 12px;">
-      <span style="width: 100px; font-size: 14px; color: #555; flex-shrink: 0; text-align: right; padding-right: 12px;">{{ item.username }}</span>
+    <div style="display: flex; align-items: center; margin-bottom: {% if loop.last %}0{% else %}8px{% endif %}; padding-left: 12px; line-height: 28px;">
+      <span style="width: 100px; font-size: 14px; color: #555; flex-shrink: 0; text-align: right; padding-right: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ item.username }}</span>
       <div style="height: 28px; background: {{ colors[loop.index0 % colors|length] }}; width: {{ item.percent }}%; border-radius: 0 4px 4px 0; min-width: 4px;"></div>
       <span style="margin-left: 8px; font-size: 14px; color: {{ colors[loop.index0 % colors|length] }}; font-weight: 500; white-space: nowrap;">${{ "%.2f"|format(item.usd) }}</span>
     </div>
@@ -67,8 +67,17 @@ class NewApiDailyRankingPlugin(Star):
             yield event.image_result(img_url)
 
     async def _render_ranking_image(self, date: str, items: list, total_usd: float) -> str:
+        item_count = len(items)
+        # Keep this in sync with the fixed heights in RANKING_TMPL.
+        clip_height = 118 + (item_count * 28) + (max(item_count - 1, 0) * 8)
+        render_options = {"full_page": False, "clip": {"x": 0, "y": 0, "width": 1280, "height": clip_height}}
+
         if not items:
-            return await self.html_render(RANKING_TMPL, {"date": date, "total_usd": 0, "items": [], "colors": BAR_COLORS})
+            return await self.html_render(
+                RANKING_TMPL,
+                {"date": date, "total_usd": 0, "items": [], "colors": BAR_COLORS},
+                options=render_options,
+            )
 
         max_usd = max(item["usd"] for item in items)
         render_items = []
@@ -80,12 +89,16 @@ class NewApiDailyRankingPlugin(Star):
                 "percent": percent,
             })
 
-        return await self.html_render(RANKING_TMPL, {
-            "date": date,
-            "total_usd": total_usd,
-            "items": render_items,
-            "colors": BAR_COLORS,
-        })
+        return await self.html_render(
+            RANKING_TMPL,
+            {
+                "date": date,
+                "total_usd": total_usd,
+                "items": render_items,
+                "colors": BAR_COLORS,
+            },
+            options=render_options,
+        )
 
     def _format_user_ranking(self, username: str, date: str, items: list) -> str:
         for item in items:
