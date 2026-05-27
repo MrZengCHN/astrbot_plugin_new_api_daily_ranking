@@ -54,7 +54,6 @@ class NewApiDailyRankingPlugin(Star):
             name = item["username"]
             usd = item["usd"]
             req_count = item["requestCount"]
-            lines.append(f"{prefix} {rank}. {name} - ${usd:.2f} ({req_count}次请求)")
             lines.append(f"{prefix} {name} - ${usd:.2f} ({req_count}次请求)" if prefix else f"{rank}. {name} - ${usd:.2f} ({req_count}次请求)")
 
         lines.append(f"\n💰 总消费: ${total_usd:.2f}")
