@@ -4,30 +4,6 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 
-RANKING_TMPL = '''
-<html><head><style>
-*, *::before, *::after { box-sizing: border-box; }
-html { height: auto; min-height: 0; }
-body { margin: 0; padding: 0; height: auto; min-height: 0; overflow: hidden; }
-</style></head><body>
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px 40px 16px; background: #fff;">
-  <h2 style="margin: 0 0 4px 0; font-size: 24px; line-height: 30px; color: #333;">用户消耗排行</h2>
-  <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 18px; color: #888;">{{ date }} &nbsp; 总计：${{ "%.2f"|format(total_usd) }}</p>
-  <div style="border-left: 3px solid #333; padding-left: 0;">
-    {% for item in items %}
-    <div style="display: flex; align-items: center; margin-bottom: {% if loop.last %}0{% else %}8px{% endif %}; padding-left: 12px; line-height: 28px;">
-      <span style="width: 100px; font-size: 14px; color: #555; flex-shrink: 0; text-align: right; padding-right: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ item.username }}</span>
-      <div style="height: 28px; background: {{ colors[loop.index0 % colors|length] }}; width: {{ item.percent }}%; border-radius: 0 4px 4px 0; min-width: 4px;"></div>
-      <span style="margin-left: 8px; font-size: 14px; color: {{ colors[loop.index0 % colors|length] }}; font-weight: 500; white-space: nowrap;">${{ "%.2f"|format(item.usd) }}</span>
-    </div>
-    {% endfor %}
-  </div>
-</div>
-</body></html>
-'''
-
-BAR_COLORS = ["#4285f4", "#ea4335", "#34a853", "#fbbc04", "#9c27b0", "#e91e63", "#00bcd4", "#ff5722", "#673ab7", "#009688"]
-
 
 @register("new_api_daily_ranking", "MrZengCHN", "newApi每日排行查询", "1.0.0")
 class NewApiDailyRankingPlugin(Star):
@@ -63,53 +39,23 @@ class NewApiDailyRankingPlugin(Star):
             yield event.plain_result(self._format_user_ranking(username, date, items))
         else:
             total_usd = data.get("totalUsd", 0)
-            img_url = await self._render_ranking_image(date, items, total_usd)
-            yield event.image_result(img_url)
+            yield event.plain_result(self._format_ranking_list(date, items, total_usd))
 
-    async def _render_ranking_image(self, date: str, items: list, total_usd: float) -> str:
-        item_count = len(items)
-        # Keep this in sync with the fixed heights in RANKING_TMPL.
-        clip_height = 118 + (item_count * 28) + (max(item_count - 1, 0) * 8)
-        render_options = {"full_page": False, "clip": {"x": 0, "y": 0, "width": 1280, "height": clip_height}}
-
+    def _format_ranking_list(self, date: str, items: list, total_usd: float) -> str:
         if not items:
-            return await self.html_render(
-                RANKING_TMPL,
-                {"date": date, "total_usd": 0, "items": [], "colors": BAR_COLORS},
-                options=render_options,
-            )
+            return f"📊 每日消费排行榜 ({date})\n\n暂无数据"
 
-        max_usd = max(item["usd"] for item in items)
-        render_items = []
+        medal = {1: "🥇", 2: "🥈", 3: "🥉"}
+        lines = [f"📊 每日消费排行榜 ({date})\n"]
         for item in items:
-            percent = (item["usd"] / max_usd * 100) if max_usd > 0 else 0
-            render_items.append({
-                "username": item["username"],
-                "usd": item["usd"],
-                "percent": percent,
-            })
+            rank = item["rank"]
+            prefix = medal.get(rank, f"{rank}.")
+            prefix = medal.get(rank, "")
+            name = item["username"]
+            usd = item["usd"]
+            req_count = item["requestCount"]
+            lines.append(f"{prefix} {rank}. {name} - ${usd:.2f} ({req_count}次请求)")
+            lines.append(f"{prefix} {name} - ${usd:.2f} ({req_count}次请求)" if prefix else f"{rank}. {name} - ${usd:.2f} ({req_count}次请求)")
 
-        return await self.html_render(
-            RANKING_TMPL,
-            {
-                "date": date,
-                "total_usd": total_usd,
-                "items": render_items,
-                "colors": BAR_COLORS,
-            },
-            options=render_options,
-        )
-
-    def _format_user_ranking(self, username: str, date: str, items: list) -> str:
-        for item in items:
-            if item["username"].lower() == username.lower():
-                rank = item["rank"]
-                usd = item["usd"]
-                req_count = item["requestCount"]
-                return (
-                    f"📊 用户 \"{item['username']}\" 的排名信息 ({date})\n\n"
-                    f"排名: 第{rank}名\n"
-                    f"消费: ${usd:.2f}\n"
-                    f"请求次数: {req_count}次"
-                )
-        return f"📊 用户 \"{username}\" 未在当日排行榜中上榜 ({date})"
+        lines.append(f"\n💰 总消费: ${total_usd:.2f}")
+        return "\n".join(lines)
