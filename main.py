@@ -13,7 +13,7 @@ class NewApiDailyRankingPlugin(Star):
         super().__init__(context)
         self.config = config
 
-    @filter.command("查看排名")
+    @filter.command("查看排名", alias={"排名"})
     async def query_ranking(self, event: AstrMessageEvent, username: str = None):
         """查看每日消费排行榜，可指定用户名查询"""
         api_base_url = self.config.get("api_base_url", "https://docs.mrzengchn.com").rstrip("/")
@@ -61,7 +61,7 @@ class NewApiDailyRankingPlugin(Star):
         lines.append(f"\n💰 总消费: ${total_usd:.2f}")
         return "\n".join(lines)
 
-    @filter.command("查看签到排名")
+    @filter.command("查看签到排名", alias={"签到"})
     async def query_checkin_ranking(self, event: AstrMessageEvent, query_date: str = None):
         """查看每日签到排行榜，可指定日期查询"""
         api_base_url = self.config.get("api_base_url", "https://docs.mrzengchn.com").rstrip("/")
