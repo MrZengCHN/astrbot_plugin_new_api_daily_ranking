@@ -1,8 +1,10 @@
+from datetime import date
+
 import aiohttp
 
-from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api import AstrBotConfig, logger
+from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
-from astrbot.api import logger, AstrBotConfig
 
 
 @register("new_api_daily_ranking", "MrZengCHN", "newApi每日排行查询", "1.0.0")
@@ -57,4 +59,49 @@ class NewApiDailyRankingPlugin(Star):
             lines.append(f"{prefix} {name} - ${usd:.2f} ({req_count}次请求)" if prefix else f"{rank}. {name} - ${usd:.2f} ({req_count}次请求)")
 
         lines.append(f"\n💰 总消费: ${total_usd:.2f}")
+        return "\n".join(lines)
+
+    @filter.command("签到排行")
+    async def query_checkin_ranking(self, event: AstrMessageEvent, query_date: str = None):
+        """查看每日签到排行榜，可指定日期查询"""
+        api_base_url = self.config.get("api_base_url", "https://docs.mrzengchn.com").rstrip("/")
+        default_limit = self.config.get("default_limit", 10)
+        query_date = query_date or date.today().isoformat()
+        url = f"{api_base_url}/api/consumption-rankings/daily-checkins?date={query_date}&limit={default_limit}"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status != 200:
+                        yield event.plain_result(f"请求签到排行榜接口失败，状态码: {resp.status}")
+                        return
+                    data = await resp.json()
+        except Exception as e:
+            logger.error(f"请求签到排行榜接口异常: {e}")
+            yield event.plain_result(f"请求签到排行榜接口异常: {e}")
+            return
+
+        ranking_date = data.get("date", query_date)
+        items = data.get("items", [])
+        total_amount = data.get("totalAmount", 0)
+        yield event.plain_result(self._format_checkin_ranking_list(ranking_date, items, total_amount))
+
+    def _format_checkin_ranking_list(self, ranking_date: str, items: list, total_amount: float) -> str:
+        if not items:
+            return f"📊 每日签到排行榜 ({ranking_date})\n\n暂无数据"
+
+        medal = {1: "🥇", 2: "🥈", 3: "🥉"}
+        lines = [f"📊 每日签到排行榜 ({ranking_date})\n"]
+        for item in items:
+            rank = item["rank"]
+            prefix = medal.get(rank, "")
+            name = item["username"]
+            amount = item["amount"]
+            checkin_count = item["checkinCount"]
+            if prefix:
+                lines.append(f"{prefix} {name} - {amount:.6f} ({checkin_count}次签到)")
+            else:
+                lines.append(f"{rank}. {name} - {amount:.6f} ({checkin_count}次签到)")
+
+        lines.append(f"\n💰 签到总额: {total_amount:.6f}")
         return "\n".join(lines)
