@@ -65,7 +65,7 @@ class NewApiDailyRankingPlugin(Star):
     async def query_checkin_ranking(self, event: AstrMessageEvent, query_date: str = None):
         """查看每日签到排行榜，可指定日期查询"""
         api_base_url = self.config.get("api_base_url", "https://docs.mrzengchn.com").rstrip("/")
-        default_limit = self.config.get("default_limit", 10)
+        default_limit = self.config.get("checkin_default_limit", self.config.get("default_limit", 10))
         query_date = query_date or date.today().isoformat()
         url = f"{api_base_url}/api/consumption-rankings/daily-checkins?date={query_date}&limit={default_limit}"
 

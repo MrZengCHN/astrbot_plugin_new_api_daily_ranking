@@ -10,5 +10,11 @@
     "type": "int",
     "hint": "1-100",
     "default": 10
+  },
+  "checkin_default_limit": {
+    "description": "签到排行默认展示排名数量",
+    "type": "int",
+    "hint": "1-100",
+    "default": 10
   }
 }
