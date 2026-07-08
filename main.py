@@ -97,11 +97,22 @@ class NewApiDailyRankingPlugin(Star):
             prefix = medal.get(rank, "")
             name = item["username"]
             amount = item["amount"]
-            checkin_count = item["checkinCount"]
-            if prefix:
-                lines.append(f"{prefix} {name} - {amount:.6f} ({checkin_count}次签到)")
+            if amount > 0:
+                amount_text = f"赚到 {amount:.6f}"
+            elif amount < 0:
+                amount_text = f"血亏 {abs(amount):.6f}"
             else:
-                lines.append(f"{rank}. {name} - {amount:.6f} ({checkin_count}次签到)")
+                amount_text = f"持平 {amount:.6f}"
+            if prefix:
+                lines.append(f"{prefix} {name} - {amount_text}")
+            else:
+                lines.append(f"{rank}. {name} - {amount_text}")
 
-        lines.append(f"\n💰 签到总额: {total_amount:.6f}")
+        if total_amount > 0:
+            total_amount_text = f"赚到 {total_amount:.6f}"
+        elif total_amount < 0:
+            total_amount_text = f"血亏 {abs(total_amount):.6f}"
+        else:
+            total_amount_text = f"持平 {total_amount:.6f}"
+        lines.append(f"\n💰 签到总额: {total_amount_text}")
         return "\n".join(lines)
