@@ -1,4 +1,5 @@
 from datetime import date
+from urllib.parse import urljoin
 
 import aiohttp
 
@@ -117,6 +118,33 @@ class NewApiDailyRankingPlugin(Star):
         lines.append(f"\n💰 签到总额: {total_amount_text}")
         return "\n".join(lines)
 
+    async def _get_pricing_data(self) -> tuple[dict | None, str | None]:
+        """请求中转站倍率数据。
+
+        Returns:
+            倍率数据和错误信息；请求成功时错误信息为 None。
+        """
+        url = self.config.get(
+            "pricing_api_url", "https://vibebabo.com/api/pricing"
+        )
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    if resp.status != 200:
+                        return None, f"请求倍率接口失败，状态码: {resp.status}"
+                    data = await resp.json()
+        except Exception as e:
+            logger.error(f"请求倍率接口异常: {e}")
+            return None, f"请求倍率接口异常: {e}"
+
+        if not data.get("success"):
+            return None, f"请求倍率接口失败: {data.get('message', '未知错误')}"
+
+        return data, None
+
     @filter.command("模型倍率")
     async def query_model_pricing(
         self, event: AstrMessageEvent, model_name: str = None
@@ -134,30 +162,9 @@ class NewApiDailyRankingPlugin(Star):
             yield event.plain_result("请指定模型名称，例如：模型倍率 gpt-5.5")
             return
 
-        url = self.config.get(
-            "pricing_api_url", "https://vibebabo.com/api/pricing"
-        )
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=10)
-                ) as resp:
-                    if resp.status != 200:
-                        yield event.plain_result(
-                            f"请求倍率接口失败，状态码: {resp.status}"
-                        )
-                        return
-                    data = await resp.json()
-        except Exception as e:
-            logger.error(f"请求倍率接口异常: {e}")
-            yield event.plain_result(f"请求倍率接口异常: {e}")
-            return
-
-        if not data.get("success"):
-            yield event.plain_result(
-                f"请求倍率接口失败: {data.get('message', '未知错误')}"
-            )
+        data, error = await self._get_pricing_data()
+        if error:
+            yield event.plain_result(error)
             return
 
         models = [
@@ -189,6 +196,109 @@ class NewApiDailyRankingPlugin(Star):
 
         yield event.plain_result("\n".join(lines))
 
+    @filter.command("模型价格")
+    async def query_model_price(
+        self, event: AstrMessageEvent, model_name: str = None
+    ):
+        """精确查询指定模型的基础价格。
+
+        Args:
+            event: 当前消息事件。
+            model_name: 要精确查询的模型名称。
+
+        Yields:
+            MessageEventResult: 模型价格查询结果。
+        """
+        if not model_name:
+            yield event.plain_result("请指定模型名称，例如：模型价格 gpt-5.5")
+            return
+
+        data, error = await self._get_pricing_data()
+        if error:
+            yield event.plain_result(error)
+            return
+
+        models = [
+            item
+            for item in data.get("data", [])
+            if item.get("model_name") == model_name
+        ]
+        if not models:
+            yield event.plain_result(
+                f"未找到模型：{model_name}（模型名称需要精确匹配）"
+            )
+            return
+
+        quota_per_unit = None
+        if any(
+            item.get("quota_type") != 1
+            and item.get("billing_mode") != "tiered_expr"
+            for item in models
+        ):
+            pricing_url = self.config.get(
+                "pricing_api_url", "https://vibebabo.com/api/pricing"
+            )
+            status_url = urljoin(pricing_url, "/api/status")
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        status_url, timeout=aiohttp.ClientTimeout(total=10)
+                    ) as resp:
+                        if resp.status != 200:
+                            yield event.plain_result(
+                                f"请求系统状态接口失败，状态码: {resp.status}"
+                            )
+                            return
+                        status_data = await resp.json()
+            except Exception as e:
+                logger.error(f"请求系统状态接口异常: {e}")
+                yield event.plain_result(f"请求系统状态接口异常: {e}")
+                return
+
+            if not status_data.get("success"):
+                yield event.plain_result(
+                    f"请求系统状态接口失败: {status_data.get('message', '未知错误')}"
+                )
+                return
+
+            try:
+                quota_per_unit = float(
+                    status_data.get("data", {}).get("quota_per_unit")
+                )
+            except (TypeError, ValueError):
+                quota_per_unit = 0
+            if quota_per_unit <= 0:
+                yield event.plain_result("系统状态接口未返回有效的 quota_per_unit")
+                return
+
+        lines = [f"📊 模型价格：{model_name}（未乘分组倍率）"]
+        for item in models:
+            if item.get("billing_mode") == "tiered_expr":
+                lines.append(
+                    f"计费表达式: {item.get('billing_expr') or '未配置'}"
+                )
+                continue
+
+            if item.get("quota_type") == 1:
+                lines.append(f"按次价格: ${item.get('model_price', 0):g}/次")
+                continue
+
+            input_price = item.get("model_ratio", 0) * 1_000_000 / quota_per_unit
+            lines.append(f"输入价格: ${input_price:g}/1M Tokens")
+            lines.append(
+                f"输出价格: ${input_price * item.get('completion_ratio', 1):g}/1M Tokens"
+            )
+            if "cache_ratio" in item:
+                lines.append(
+                    f"缓存价格: ${input_price * item['cache_ratio']:g}/1M Tokens"
+                )
+            if "create_cache_ratio" in item:
+                lines.append(
+                    f"写缓存价格: ${input_price * item['create_cache_ratio']:g}/1M Tokens"
+                )
+
+        yield event.plain_result("\n".join(lines))
+
     @filter.command("分组倍率")
     async def query_group_pricing(self, event: AstrMessageEvent):
         """查看中转站全部分组倍率。
@@ -199,30 +309,9 @@ class NewApiDailyRankingPlugin(Star):
         Yields:
             MessageEventResult: 分组倍率查询结果。
         """
-        url = self.config.get(
-            "pricing_api_url", "https://vibebabo.com/api/pricing"
-        )
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=10)
-                ) as resp:
-                    if resp.status != 200:
-                        yield event.plain_result(
-                            f"请求倍率接口失败，状态码: {resp.status}"
-                        )
-                        return
-                    data = await resp.json()
-        except Exception as e:
-            logger.error(f"请求倍率接口异常: {e}")
-            yield event.plain_result(f"请求倍率接口异常: {e}")
-            return
-
-        if not data.get("success"):
-            yield event.plain_result(
-                f"请求倍率接口失败: {data.get('message', '未知错误')}"
-            )
+        data, error = await self._get_pricing_data()
+        if error:
+            yield event.plain_result(error)
             return
 
         group_ratio = data.get("group_ratio", {})
