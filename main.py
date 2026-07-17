@@ -98,6 +98,8 @@ class NewApiDailyRankingPlugin(Star):
                             for group in changed_groups:
                                 old_ratio = previous_ratios.get(group)
                                 new_ratio = current_ratios.get(group)
+                                if old_ratio is not None and old_ratio == new_ratio:
+                                    continue
                                 if old_ratio is None:
                                     lines.append(f"{group}: 新增 {new_ratio:g}x")
                                 elif new_ratio is None:
