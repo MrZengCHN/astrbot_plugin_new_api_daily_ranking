@@ -2,8 +2,14 @@
   "api_base_url": {
     "description": "排行榜后端 API 地址",
     "type": "string",
-    "hint": "例如 https://docs.mrzengchn.com",
-    "default": "https://docs.mrzengchn.com"
+    "hint": "例如 https://docs.vibebabo.com",
+    "default": "https://docs.vibebabo.com"
+  },
+  "pricing_api_url": {
+    "description": "倍率 API 地址",
+    "type": "string",
+    "hint": "例如 https://vibebabo.com/api/pricing",
+    "default": "https://vibebabo.com/api/pricing"
   },
   "default_limit": {
     "description": "默认展示排名数量",
