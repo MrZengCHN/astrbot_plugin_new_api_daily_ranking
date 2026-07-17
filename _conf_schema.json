@@ -22,5 +22,29 @@
     "type": "int",
     "hint": "1-100",
     "default": 10
+  },
+  "notify_platform_id": {
+    "description": "主动通知使用的 OneBot 平台实例 ID",
+    "type": "string",
+    "hint": "默认使用 default",
+    "default": "default"
+  },
+  "notify_group_ids": {
+    "description": "主动通知的 QQ 群号",
+    "type": "string",
+    "hint": "多个群号使用逗号或换行分隔",
+    "default": ""
+  },
+  "notify_user_ids": {
+    "description": "主动通知的 QQ 号",
+    "type": "string",
+    "hint": "多个 QQ 号使用逗号或换行分隔",
+    "default": ""
+  },
+  "notify_interval_seconds": {
+    "description": "分组倍率检测间隔（秒）",
+    "type": "int",
+    "hint": "设置为 0 停用，建议不低于 60 秒",
+    "default": 300
   }
 }

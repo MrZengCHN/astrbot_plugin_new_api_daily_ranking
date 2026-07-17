@@ -1,10 +1,11 @@
+import asyncio
 from datetime import date
 from urllib.parse import urljoin
 
 import aiohttp
 
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star, register
 
 
@@ -13,6 +14,132 @@ class NewApiDailyRankingPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
+        self._ratio_notify_task: asyncio.Task | None = None
+
+    async def initialize(self) -> None:
+        """Start the group-ratio polling task when notification is configured."""
+        interval = int(self.config.get("notify_interval_seconds", 300))
+        platform_id = str(self.config.get("notify_platform_id") or "default").strip()
+        group_ids = list(
+            dict.fromkeys(
+                item.strip()
+                for item in str(self.config.get("notify_group_ids") or "")
+                .replace("\n", ",")
+                .split(",")
+                if item.strip()
+            )
+        )
+        user_ids = list(
+            dict.fromkeys(
+                item.strip()
+                for item in str(self.config.get("notify_user_ids") or "")
+                .replace("\n", ",")
+                .split(",")
+                if item.strip()
+            )
+        )
+
+        if interval <= 0 or not platform_id or not (group_ids or user_ids):
+            logger.info("分组倍率主动通知未启用：未配置有效目标或检测间隔。")
+            return
+
+        self._ratio_notify_task = asyncio.create_task(
+            self._ratio_notify_loop(interval, platform_id, group_ids, user_ids)
+        )
+
+    async def terminate(self) -> None:
+        """Stop the group-ratio polling task when the plugin is terminated."""
+        if self._ratio_notify_task is None:
+            return
+
+        self._ratio_notify_task.cancel()
+        try:
+            await self._ratio_notify_task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._ratio_notify_task = None
+
+    async def _ratio_notify_loop(
+        self,
+        interval: int,
+        platform_id: str,
+        group_ids: list[str],
+        user_ids: list[str],
+    ) -> None:
+        """Poll group ratios and notify configured OneBot sessions on changes."""
+        previous_ratios: dict[str, float] | None = None
+        while True:
+            data, error = await self._get_pricing_data()
+            if error:
+                logger.warning(f"分组倍率主动通知检测失败: {error}")
+            else:
+                raw_ratios = data.get("group_ratio")
+                if not isinstance(raw_ratios, dict):
+                    logger.warning("分组倍率主动通知检测失败: group_ratio 格式无效")
+                else:
+                    try:
+                        current_ratios = {
+                            str(group): float(ratio)
+                            for group, ratio in raw_ratios.items()
+                        }
+                    except (TypeError, ValueError):
+                        logger.warning(
+                            "分组倍率主动通知检测失败: group_ratio 包含无效倍率"
+                        )
+                    else:
+                        if previous_ratios is None:
+                            previous_ratios = current_ratios
+                        elif current_ratios != previous_ratios:
+                            changed_groups = sorted(
+                                set(previous_ratios) | set(current_ratios)
+                            )
+                            lines = ["📢 分组倍率发生变化"]
+                            for group in changed_groups:
+                                old_ratio = previous_ratios.get(group)
+                                new_ratio = current_ratios.get(group)
+                                if old_ratio is None:
+                                    lines.append(f"{group}: 新增 {new_ratio:g}x")
+                                elif new_ratio is None:
+                                    lines.append(f"{group}: {old_ratio:g}x -> 已移除")
+                                else:
+                                    lines.append(
+                                        f"{group}: {old_ratio:g}x -> {new_ratio:g}x"
+                                    )
+
+                            message = MessageChain().message("\n".join(lines))
+                            targets = [
+                                (
+                                    f"{platform_id}:GroupMessage:{group_id}",
+                                    "群聊",
+                                    group_id,
+                                )
+                                for group_id in group_ids
+                            ] + [
+                                (
+                                    f"{platform_id}:FriendMessage:{user_id}",
+                                    "私聊",
+                                    user_id,
+                                )
+                                for user_id in user_ids
+                            ]
+                            for session, target_type, target_id in targets:
+                                try:
+                                    sent = await self.context.send_message(
+                                        session, message
+                                    )
+                                    if not sent:
+                                        logger.warning(
+                                            f"分组倍率主动通知未找到{target_type}平台: {target_id}"
+                                        )
+                                except Exception as e:
+                                    logger.error(
+                                        f"分组倍率主动通知发送到{target_type} {target_id}失败: {e}"
+                                    )
+
+                            previous_ratios = current_ratios
+
+            await asyncio.sleep(interval)
 
     @filter.command("查看排名", alias={"排名"})
     async def query_ranking(self, event: AstrMessageEvent, username: str = None):
