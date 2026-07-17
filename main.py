@@ -182,20 +182,10 @@ class NewApiDailyRankingPlugin(Star):
             for group in groups:
                 ratio = group_ratio.get(group)
                 if ratio is None:
-                    lines.append(f"\n{model_name} × {group}: 分组倍率未知")
+                    lines.append(f"{model_name}  {group}: 分组倍率未知")
                     continue
 
-                if item.get("quota_type") == 1:
-                    price = item.get("model_price", 0)
-                    lines.append(
-                        f"{model_name} × {group}: ${price:g}/次 × {ratio:g}x = ${price * ratio:g}/次"
-                    )
-                    continue
-
-                model_ratio = item.get("model_ratio", 0)
-                lines.append(
-                    f"{model_name} × {group}: {model_ratio:g}x × {ratio:g}x = {model_ratio * ratio:g}x"
-                )
+                lines.append(f"{model_name}  {group}: {ratio:g}x")
 
         yield event.plain_result("\n".join(lines))
 
