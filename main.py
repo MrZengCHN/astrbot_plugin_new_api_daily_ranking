@@ -394,6 +394,76 @@ class NewApiDailyRankingPlugin(Star):
 
         return data, None
 
+    @filter.command("第三方倍率")
+    async def query_third_party_pricing(
+        self, event: AstrMessageEvent, channel_name: str = None
+    ):
+        """查询一个或全部第三方渠道的分组倍率。
+
+        Args:
+            event: 当前消息事件。
+            channel_name: 要查询的渠道名称；为空时查询全部渠道。
+
+        Yields:
+            MessageEventResult: 每个第三方渠道各自的倍率查询结果。
+        """
+        raw_channels = self.config.get("third_party_pricing_channels") or []
+        if not isinstance(raw_channels, list):
+            raw_channels = []
+
+        channels: list[tuple[str, str]] = []
+        seen_urls: set[str] = set()
+        for channel in raw_channels:
+            if not isinstance(channel, dict):
+                continue
+            name = str(channel.get("name") or "").strip()
+            pricing_url = str(channel.get("pricing_api_url") or "").strip()
+            if not name or not pricing_url or pricing_url in seen_urls:
+                continue
+            seen_urls.add(pricing_url)
+            channels.append((name, pricing_url))
+
+        if channel_name:
+            channel_name = channel_name.strip()
+            channels = [channel for channel in channels if channel[0] == channel_name]
+            if not channels:
+                yield event.plain_result(f"未找到第三方渠道：{channel_name}")
+                return
+        elif not channels:
+            yield event.plain_result("未配置第三方渠道倍率接口")
+            return
+
+        for name, pricing_url in channels:
+            lines = [
+                "📊 第三方渠道分组倍率",
+                f"渠道: {name}",
+                f"Pricing: {pricing_url}",
+            ]
+            data, error = await self._get_pricing_data(pricing_url)
+            if error:
+                lines.append(error)
+                yield event.plain_result("\n".join(lines))
+                continue
+
+            raw_ratios = data.get("group_ratio")
+            if not isinstance(raw_ratios, dict):
+                lines.append("倍率接口返回的 group_ratio 格式无效")
+            else:
+                try:
+                    group_ratio = {
+                        str(group): float(ratio) for group, ratio in raw_ratios.items()
+                    }
+                except (TypeError, ValueError):
+                    lines.append("倍率接口返回的 group_ratio 包含无效倍率")
+                else:
+                    if group_ratio:
+                        for group in sorted(group_ratio):
+                            lines.append(f"{group}: {group_ratio[group]:g}x")
+                    else:
+                        lines.append("暂无数据")
+
+            yield event.plain_result("\n".join(lines))
+
     @filter.command("模型倍率")
     async def query_model_pricing(
         self, event: AstrMessageEvent, model_name: str = None

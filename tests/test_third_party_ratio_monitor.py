@@ -19,6 +19,119 @@ NewApiDailyRankingPlugin = PLUGIN_MODULE.NewApiDailyRankingPlugin
 
 
 @pytest.mark.asyncio
+async def test_query_third_party_ratio_by_channel_name():
+    event = MagicMock()
+    event.plain_result.side_effect = lambda message: message
+    plugin = NewApiDailyRankingPlugin(
+        MagicMock(),
+        {
+            "third_party_pricing_channels": [
+                {
+                    "name": "Alpha",
+                    "pricing_api_url": "https://alpha.example/api/pricing",
+                },
+                {
+                    "name": "Beta",
+                    "pricing_api_url": "https://beta.example/api/pricing",
+                },
+            ]
+        },
+    )
+    plugin._get_pricing_data = AsyncMock(
+        return_value=(
+            {"success": True, "group_ratio": {"vip": 2, "default": "1.5"}},
+            None,
+        )
+    )
+
+    results = [
+        result async for result in plugin.query_third_party_pricing(event, "Beta")
+    ]
+
+    plugin._get_pricing_data.assert_awaited_once_with(
+        "https://beta.example/api/pricing"
+    )
+    assert results == [
+        "📊 第三方渠道分组倍率\n"
+        "渠道: Beta\n"
+        "Pricing: https://beta.example/api/pricing\n"
+        "default: 1.5x\n"
+        "vip: 2x"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_query_all_third_party_ratios_sends_one_message_per_channel():
+    event = MagicMock()
+    event.plain_result.side_effect = lambda message: message
+    plugin = NewApiDailyRankingPlugin(
+        MagicMock(),
+        {
+            "third_party_pricing_channels": [
+                {
+                    "name": "Alpha",
+                    "pricing_api_url": "https://alpha.example/api/pricing",
+                },
+                {
+                    "name": "Beta",
+                    "pricing_api_url": "https://beta.example/api/pricing",
+                },
+            ]
+        },
+    )
+    plugin._get_pricing_data = AsyncMock(
+        side_effect=[
+            ({"success": True, "group_ratio": {"default": 1}}, None),
+            (None, "请求倍率接口失败，状态码: 503"),
+        ]
+    )
+
+    results = [
+        result async for result in plugin.query_third_party_pricing(event)
+    ]
+
+    assert plugin._get_pricing_data.await_args_list == [
+        call("https://alpha.example/api/pricing"),
+        call("https://beta.example/api/pricing"),
+    ]
+    assert results == [
+        "📊 第三方渠道分组倍率\n"
+        "渠道: Alpha\n"
+        "Pricing: https://alpha.example/api/pricing\n"
+        "default: 1x",
+        "📊 第三方渠道分组倍率\n"
+        "渠道: Beta\n"
+        "Pricing: https://beta.example/api/pricing\n"
+        "请求倍率接口失败，状态码: 503",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_query_third_party_ratio_reports_unknown_channel():
+    event = MagicMock()
+    event.plain_result.side_effect = lambda message: message
+    plugin = NewApiDailyRankingPlugin(
+        MagicMock(),
+        {
+            "third_party_pricing_channels": [
+                {
+                    "name": "Alpha",
+                    "pricing_api_url": "https://alpha.example/api/pricing",
+                }
+            ]
+        },
+    )
+    plugin._get_pricing_data = AsyncMock()
+
+    results = [
+        result async for result in plugin.query_third_party_pricing(event, "Beta")
+    ]
+
+    plugin._get_pricing_data.assert_not_awaited()
+    assert results == ["未找到第三方渠道：Beta"]
+
+
+@pytest.mark.asyncio
 async def test_initialize_starts_only_valid_unique_third_party_channels():
     context = MagicMock()
     config = {
