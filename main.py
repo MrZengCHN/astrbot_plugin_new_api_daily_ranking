@@ -15,9 +15,10 @@ class NewApiDailyRankingPlugin(Star):
         super().__init__(context)
         self.config = config
         self._ratio_notify_task: asyncio.Task | None = None
+        self._third_party_ratio_notify_tasks: list[asyncio.Task] = []
 
     async def initialize(self) -> None:
-        """Start the group-ratio polling task when notification is configured."""
+        """Start configured primary and third-party group-ratio polling tasks."""
         interval = int(self.config.get("notify_interval_seconds", 300))
         platform_id = str(self.config.get("notify_platform_id") or "default").strip()
         group_ids = list(
@@ -41,24 +42,99 @@ class NewApiDailyRankingPlugin(Star):
 
         if interval <= 0 or not platform_id or not (group_ids or user_ids):
             logger.info("分组倍率主动通知未启用：未配置有效目标或检测间隔。")
-            return
+        else:
+            self._ratio_notify_task = asyncio.create_task(
+                self._ratio_notify_loop(interval, platform_id, group_ids, user_ids)
+            )
 
-        self._ratio_notify_task = asyncio.create_task(
-            self._ratio_notify_loop(interval, platform_id, group_ids, user_ids)
+        third_party_interval = int(
+            self.config.get("third_party_notify_interval_seconds", 300)
+        )
+        third_party_platform_id = str(
+            self.config.get("third_party_notify_platform_id") or "default"
+        ).strip()
+        third_party_group_ids = list(
+            dict.fromkeys(
+                item.strip()
+                for item in str(self.config.get("third_party_notify_group_ids") or "")
+                .replace("\n", ",")
+                .split(",")
+                if item.strip()
+            )
+        )
+        third_party_user_ids = list(
+            dict.fromkeys(
+                item.strip()
+                for item in str(self.config.get("third_party_notify_user_ids") or "")
+                .replace("\n", ",")
+                .split(",")
+                if item.strip()
+            )
         )
 
-    async def terminate(self) -> None:
-        """Stop the group-ratio polling task when the plugin is terminated."""
-        if self._ratio_notify_task is None:
+        raw_channels = self.config.get("third_party_pricing_channels") or []
+        if not isinstance(raw_channels, list):
+            logger.warning("第三方渠道倍率监听配置无效：渠道配置应为列表。")
+            raw_channels = []
+
+        channels: list[tuple[str, str]] = []
+        seen_urls: set[str] = set()
+        for channel in raw_channels:
+            if not isinstance(channel, dict):
+                logger.warning("第三方渠道倍率监听已跳过无效渠道配置。")
+                continue
+            name = str(channel.get("name") or "").strip()
+            pricing_url = str(channel.get("pricing_api_url") or "").strip()
+            if not name or not pricing_url:
+                logger.warning("第三方渠道倍率监听已跳过缺少名称或 URL 的配置。")
+                continue
+            if pricing_url in seen_urls:
+                logger.warning(f"第三方渠道倍率监听已跳过重复 URL: {pricing_url}")
+                continue
+            seen_urls.add(pricing_url)
+            channels.append((name, pricing_url))
+
+        if (
+            third_party_interval <= 0
+            or not third_party_platform_id
+            or not (third_party_group_ids or third_party_user_ids)
+            or not channels
+        ):
+            logger.info(
+                "第三方渠道分组倍率主动通知未启用：未配置有效渠道、目标或检测间隔。"
+            )
             return
 
-        self._ratio_notify_task.cancel()
+        for name, pricing_url in channels:
+            self._third_party_ratio_notify_tasks.append(
+                asyncio.create_task(
+                    self._ratio_notify_loop(
+                        third_party_interval,
+                        third_party_platform_id,
+                        third_party_group_ids,
+                        third_party_user_ids,
+                        pricing_url=pricing_url,
+                        source_name=name,
+                        notify_initial=True,
+                    )
+                )
+            )
+
+    async def terminate(self) -> None:
+        """Stop all group-ratio polling tasks when the plugin is terminated."""
+        tasks = list(self._third_party_ratio_notify_tasks)
+        if self._ratio_notify_task is not None:
+            tasks.insert(0, self._ratio_notify_task)
+        if not tasks:
+            return
+
+        for task in tasks:
+            task.cancel()
         try:
-            await self._ratio_notify_task
-        except asyncio.CancelledError:
-            pass
+            await asyncio.gather(*tasks, return_exceptions=True)
         finally:
             self._ratio_notify_task = None
+            self._third_party_ratio_notify_tasks = []
 
     async def _ratio_notify_loop(
         self,
@@ -66,17 +142,35 @@ class NewApiDailyRankingPlugin(Star):
         platform_id: str,
         group_ids: list[str],
         user_ids: list[str],
+        pricing_url: str | None = None,
+        source_name: str | None = None,
+        notify_initial: bool = False,
     ) -> None:
-        """Poll group ratios and notify configured OneBot sessions on changes."""
+        """Poll group ratios and notify configured OneBot sessions.
+
+        Args:
+            interval: Polling interval in seconds.
+            platform_id: OneBot platform instance ID used for notifications.
+            group_ids: QQ group IDs that receive notifications.
+            user_ids: QQ user IDs that receive notifications.
+            pricing_url: Pricing endpoint override for a third-party channel.
+            source_name: Third-party channel name shown in notifications.
+            notify_initial: Whether to notify the first successful snapshot.
+        """
         previous_ratios: dict[str, float] | None = None
+        log_prefix = (
+            f"第三方渠道分组倍率主动通知[{source_name} | {pricing_url}]"
+            if source_name and pricing_url
+            else "分组倍率主动通知"
+        )
         while True:
-            data, error = await self._get_pricing_data()
+            data, error = await self._get_pricing_data(pricing_url)
             if error:
-                logger.warning(f"分组倍率主动通知检测失败: {error}")
+                logger.warning(f"{log_prefix}检测失败: {error}")
             else:
                 raw_ratios = data.get("group_ratio")
                 if not isinstance(raw_ratios, dict):
-                    logger.warning("分组倍率主动通知检测失败: group_ratio 格式无效")
+                    logger.warning(f"{log_prefix}检测失败: group_ratio 格式无效")
                 else:
                     try:
                         current_ratios = {
@@ -85,16 +179,36 @@ class NewApiDailyRankingPlugin(Star):
                         }
                     except (TypeError, ValueError):
                         logger.warning(
-                            "分组倍率主动通知检测失败: group_ratio 包含无效倍率"
+                            f"{log_prefix}检测失败: group_ratio 包含无效倍率"
                         )
                     else:
+                        lines: list[str] | None = None
                         if previous_ratios is None:
-                            previous_ratios = current_ratios
+                            if notify_initial:
+                                lines = [
+                                    "📢 第三方渠道分组倍率初始化",
+                                    f"渠道: {source_name}",
+                                    f"Pricing: {pricing_url}",
+                                ]
+                                if current_ratios:
+                                    for group in sorted(current_ratios):
+                                        lines.append(
+                                            f"{group}: {current_ratios[group]:g}x"
+                                        )
+                                else:
+                                    lines.append("暂无数据")
                         elif current_ratios != previous_ratios:
                             changed_groups = sorted(
                                 set(previous_ratios) | set(current_ratios)
                             )
-                            lines = ["📢 分组倍率发生变化"]
+                            if source_name and pricing_url:
+                                lines = [
+                                    "📢 第三方渠道分组倍率发生变化",
+                                    f"渠道: {source_name}",
+                                    f"Pricing: {pricing_url}",
+                                ]
+                            else:
+                                lines = ["📢 分组倍率发生变化"]
                             for group in changed_groups:
                                 old_ratio = previous_ratios.get(group)
                                 new_ratio = current_ratios.get(group)
@@ -109,6 +223,7 @@ class NewApiDailyRankingPlugin(Star):
                                         f"{group}: {old_ratio:g}x -> {new_ratio:g}x"
                                     )
 
+                        if lines is not None:
                             message = MessageChain().message("\n".join(lines))
                             targets = [
                                 (
@@ -132,13 +247,14 @@ class NewApiDailyRankingPlugin(Star):
                                     )
                                     if not sent:
                                         logger.warning(
-                                            f"分组倍率主动通知未找到{target_type}平台: {target_id}"
+                                            f"{log_prefix}未找到{target_type}平台: {target_id}"
                                         )
                                 except Exception as e:
                                     logger.error(
-                                        f"分组倍率主动通知发送到{target_type} {target_id}失败: {e}"
+                                        f"{log_prefix}发送到{target_type} {target_id}失败: {e}"
                                     )
 
+                        if previous_ratios is None or current_ratios != previous_ratios:
                             previous_ratios = current_ratios
 
             await asyncio.sleep(interval)
@@ -247,15 +363,19 @@ class NewApiDailyRankingPlugin(Star):
         lines.append(f"\n💰 签到总额: {total_amount_text}")
         return "\n".join(lines)
 
-    async def _get_pricing_data(self) -> tuple[dict | None, str | None]:
+    async def _get_pricing_data(
+        self, url: str | None = None
+    ) -> tuple[dict | None, str | None]:
         """请求中转站倍率数据。
+
+        Args:
+            url: 指定的倍率接口地址；为空时使用主倍率接口配置。
 
         Returns:
             倍率数据和错误信息；请求成功时错误信息为 None。
         """
-        url = self.config.get(
-            "pricing_api_url", "https://vibebabo.com/api/pricing"
-        )
+        if url is None:
+            url = self.config.get("pricing_api_url", "https://vibebabo.com/api/pricing")
 
         try:
             async with aiohttp.ClientSession() as session:

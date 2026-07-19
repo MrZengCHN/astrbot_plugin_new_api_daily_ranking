@@ -11,6 +11,31 @@
     "hint": "例如 https://vibebabo.com/api/pricing",
     "default": "https://vibebabo.com/api/pricing"
   },
+  "third_party_pricing_channels": {
+    "description": "第三方渠道倍率接口",
+    "type": "template_list",
+    "hint": "可添加多个第三方渠道，每个渠道独立监听",
+    "default": [],
+    "templates": {
+      "channel": {
+        "name": "第三方渠道",
+        "items": {
+          "name": {
+            "description": "渠道名称",
+            "type": "string",
+            "hint": "用于在通知中区分第三方渠道",
+            "default": ""
+          },
+          "pricing_api_url": {
+            "description": "Pricing API 地址",
+            "type": "string",
+            "hint": "例如 https://example.com/api/pricing",
+            "default": ""
+          }
+        }
+      }
+    }
+  },
   "default_limit": {
     "description": "默认展示排名数量",
     "type": "int",
@@ -43,6 +68,30 @@
   },
   "notify_interval_seconds": {
     "description": "分组倍率检测间隔（秒）",
+    "type": "int",
+    "hint": "设置为 0 停用，建议不低于 60 秒",
+    "default": 300
+  },
+  "third_party_notify_platform_id": {
+    "description": "第三方倍率通知使用的 OneBot 平台实例 ID",
+    "type": "string",
+    "hint": "默认使用 default，不沿用已有通知配置",
+    "default": "default"
+  },
+  "third_party_notify_group_ids": {
+    "description": "第三方倍率通知的 QQ 群号",
+    "type": "string",
+    "hint": "多个群号使用逗号或换行分隔",
+    "default": ""
+  },
+  "third_party_notify_user_ids": {
+    "description": "第三方倍率通知的 QQ 号",
+    "type": "string",
+    "hint": "多个 QQ 号使用逗号或换行分隔",
+    "default": ""
+  },
+  "third_party_notify_interval_seconds": {
+    "description": "第三方分组倍率检测间隔（秒）",
     "type": "int",
     "hint": "设置为 0 停用，建议不低于 60 秒",
     "default": 300
