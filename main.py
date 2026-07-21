@@ -77,7 +77,7 @@ class NewApiDailyRankingPlugin(Star):
             logger.warning("第三方渠道倍率监听配置无效：渠道配置应为列表。")
             raw_channels = []
 
-        channels: list[tuple[str, str]] = []
+        channels: list[tuple[str, str, str, str]] = []
         seen_urls: set[str] = set()
         for channel in raw_channels:
             if not isinstance(channel, dict):
@@ -91,8 +91,14 @@ class NewApiDailyRankingPlugin(Star):
             if pricing_url in seen_urls:
                 logger.warning(f"第三方渠道倍率监听已跳过重复 URL: {pricing_url}")
                 continue
+            new_api_user = str(channel.get("new_api_user") or "").strip()
+            authorization_token = str(
+                channel.get("authorization_token") or ""
+            ).strip()
             seen_urls.add(pricing_url)
-            channels.append((name, pricing_url))
+            channels.append(
+                (name, pricing_url, new_api_user, authorization_token)
+            )
 
         if (
             third_party_interval <= 0
@@ -105,7 +111,7 @@ class NewApiDailyRankingPlugin(Star):
             )
             return
 
-        for name, pricing_url in channels:
+        for name, pricing_url, new_api_user, authorization_token in channels:
             self._third_party_ratio_notify_tasks.append(
                 asyncio.create_task(
                     self._ratio_notify_loop(
@@ -116,6 +122,8 @@ class NewApiDailyRankingPlugin(Star):
                         pricing_url=pricing_url,
                         source_name=name,
                         notify_initial=True,
+                        new_api_user=new_api_user,
+                        authorization_token=authorization_token,
                     )
                 )
             )
@@ -145,6 +153,8 @@ class NewApiDailyRankingPlugin(Star):
         pricing_url: str | None = None,
         source_name: str | None = None,
         notify_initial: bool = False,
+        new_api_user: str | None = None,
+        authorization_token: str | None = None,
     ) -> None:
         """Poll group ratios and notify configured OneBot sessions.
 
@@ -156,6 +166,8 @@ class NewApiDailyRankingPlugin(Star):
             pricing_url: Pricing endpoint override for a third-party channel.
             source_name: Third-party channel name shown in notifications.
             notify_initial: Whether to notify the first successful snapshot.
+            new_api_user: Optional new-api-user header for a third-party channel.
+            authorization_token: Optional bearer token for a third-party channel.
         """
         previous_ratios: dict[str, float] | None = None
         log_prefix = (
@@ -164,7 +176,12 @@ class NewApiDailyRankingPlugin(Star):
             else "分组倍率主动通知"
         )
         while True:
-            data, error = await self._get_pricing_data(pricing_url)
+            if new_api_user or authorization_token:
+                data, error = await self._get_pricing_data(
+                    pricing_url, new_api_user, authorization_token
+                )
+            else:
+                data, error = await self._get_pricing_data(pricing_url)
             if error:
                 logger.warning(f"{log_prefix}检测失败: {error}")
             else:
@@ -364,23 +381,40 @@ class NewApiDailyRankingPlugin(Star):
         return "\n".join(lines)
 
     async def _get_pricing_data(
-        self, url: str | None = None
+        self,
+        url: str | None = None,
+        new_api_user: str | None = None,
+        authorization_token: str | None = None,
     ) -> tuple[dict | None, str | None]:
         """请求中转站倍率数据。
 
         Args:
             url: 指定的倍率接口地址；为空时使用主倍率接口配置。
+            new_api_user: 指定接口的 new-api-user 请求头。
+            authorization_token: 指定接口的 Bearer 令牌。
 
         Returns:
             倍率数据和错误信息；请求成功时错误信息为 None。
         """
         if url is None:
             url = self.config.get("pricing_api_url", "https://vibebabo.com/api/pricing")
+            new_api_user = self.config.get("pricing_new_api_user")
+            authorization_token = self.config.get("pricing_authorization_token")
+
+        headers: dict[str, str] = {}
+        new_api_user = str(new_api_user or "").strip()
+        authorization_token = str(authorization_token or "").strip()
+        if new_api_user:
+            headers["new-api-user"] = new_api_user
+        if authorization_token:
+            headers["Authorization"] = f"Bearer {authorization_token}"
 
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=10)
+                    url,
+                    headers=headers or None,
+                    timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
                     if resp.status != 200:
                         return None, f"请求倍率接口失败，状态码: {resp.status}"
@@ -411,7 +445,7 @@ class NewApiDailyRankingPlugin(Star):
         if not isinstance(raw_channels, list):
             raw_channels = []
 
-        channels: list[tuple[str, str]] = []
+        channels: list[tuple[str, str, str, str]] = []
         seen_urls: set[str] = set()
         for channel in raw_channels:
             if not isinstance(channel, dict):
@@ -420,8 +454,14 @@ class NewApiDailyRankingPlugin(Star):
             pricing_url = str(channel.get("pricing_api_url") or "").strip()
             if not name or not pricing_url or pricing_url in seen_urls:
                 continue
+            new_api_user = str(channel.get("new_api_user") or "").strip()
+            authorization_token = str(
+                channel.get("authorization_token") or ""
+            ).strip()
             seen_urls.add(pricing_url)
-            channels.append((name, pricing_url))
+            channels.append(
+                (name, pricing_url, new_api_user, authorization_token)
+            )
 
         if channel_name:
             channel_name = channel_name.strip()
@@ -433,13 +473,18 @@ class NewApiDailyRankingPlugin(Star):
             yield event.plain_result("未配置第三方渠道倍率接口")
             return
 
-        for name, pricing_url in channels:
+        for name, pricing_url, new_api_user, authorization_token in channels:
             lines = [
                 "📊 第三方渠道分组倍率",
                 f"渠道: {name}",
                 f"Pricing: {pricing_url}",
             ]
-            data, error = await self._get_pricing_data(pricing_url)
+            if new_api_user or authorization_token:
+                data, error = await self._get_pricing_data(
+                    pricing_url, new_api_user, authorization_token
+                )
+            else:
+                data, error = await self._get_pricing_data(pricing_url)
             if error:
                 lines.append(error)
                 yield event.plain_result("\n".join(lines))

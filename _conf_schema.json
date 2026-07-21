@@ -11,6 +11,18 @@
     "hint": "例如 https://vibebabo.com/api/pricing",
     "default": "https://vibebabo.com/api/pricing"
   },
+  "pricing_new_api_user": {
+    "description": "倍率 API 的 new-api-user 请求头",
+    "type": "string",
+    "hint": "可选，例如 1；留空时不发送",
+    "default": ""
+  },
+  "pricing_authorization_token": {
+    "description": "倍率 API 的 Authorization 令牌",
+    "type": "string",
+    "hint": "可选，仅填写令牌，不要包含 Bearer 前缀",
+    "default": ""
+  },
   "third_party_pricing_channels": {
     "description": "第三方渠道倍率接口",
     "type": "template_list",
@@ -30,6 +42,18 @@
             "description": "Pricing API 地址",
             "type": "string",
             "hint": "例如 https://example.com/api/pricing",
+            "default": ""
+          },
+          "new_api_user": {
+            "description": "new-api-user 请求头",
+            "type": "string",
+            "hint": "可选，例如 1；留空时不发送",
+            "default": ""
+          },
+          "authorization_token": {
+            "description": "Authorization 令牌",
+            "type": "string",
+            "hint": "可选，仅填写令牌，不要包含 Bearer 前缀",
             "default": ""
           }
         }
