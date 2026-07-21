@@ -1,6 +1,5 @@
 import asyncio
 from datetime import date
-from urllib.parse import urljoin
 
 import aiohttp
 
@@ -78,26 +77,28 @@ class NewApiDailyRankingPlugin(Star):
             raw_channels = []
 
         channels: list[tuple[str, str, str, str]] = []
-        seen_urls: set[str] = set()
+        seen_hosts: set[str] = set()
         for channel in raw_channels:
             if not isinstance(channel, dict):
                 logger.warning("第三方渠道倍率监听已跳过无效渠道配置。")
                 continue
             name = str(channel.get("name") or "").strip()
-            pricing_url = str(channel.get("pricing_api_url") or "").strip()
-            if not name or not pricing_url:
-                logger.warning("第三方渠道倍率监听已跳过缺少名称或 URL 的配置。")
+            pricing_host = self._normalize_host(channel.get("pricing_api_host"))
+            if not name or not pricing_host:
+                logger.warning("第三方渠道倍率监听已跳过缺少名称或 Host 的配置。")
                 continue
-            if pricing_url in seen_urls:
-                logger.warning(f"第三方渠道倍率监听已跳过重复 URL: {pricing_url}")
+            if pricing_host in seen_hosts:
+                logger.warning(
+                    f"第三方渠道倍率监听已跳过重复 Host: {pricing_host}"
+                )
                 continue
             new_api_user = str(channel.get("new_api_user") or "").strip()
             authorization_token = str(
                 channel.get("authorization_token") or ""
             ).strip()
-            seen_urls.add(pricing_url)
+            seen_hosts.add(pricing_host)
             channels.append(
-                (name, pricing_url, new_api_user, authorization_token)
+                (name, pricing_host, new_api_user, authorization_token)
             )
 
         if (
@@ -111,7 +112,7 @@ class NewApiDailyRankingPlugin(Star):
             )
             return
 
-        for name, pricing_url, new_api_user, authorization_token in channels:
+        for name, pricing_host, new_api_user, authorization_token in channels:
             self._third_party_ratio_notify_tasks.append(
                 asyncio.create_task(
                     self._ratio_notify_loop(
@@ -119,7 +120,7 @@ class NewApiDailyRankingPlugin(Star):
                         third_party_platform_id,
                         third_party_group_ids,
                         third_party_user_ids,
-                        pricing_url=pricing_url,
+                        pricing_host=pricing_host,
                         source_name=name,
                         notify_initial=True,
                         new_api_user=new_api_user,
@@ -150,7 +151,7 @@ class NewApiDailyRankingPlugin(Star):
         platform_id: str,
         group_ids: list[str],
         user_ids: list[str],
-        pricing_url: str | None = None,
+        pricing_host: str | None = None,
         source_name: str | None = None,
         notify_initial: bool = False,
         new_api_user: str | None = None,
@@ -163,25 +164,28 @@ class NewApiDailyRankingPlugin(Star):
             platform_id: OneBot platform instance ID used for notifications.
             group_ids: QQ group IDs that receive notifications.
             user_ids: QQ user IDs that receive notifications.
-            pricing_url: Pricing endpoint override for a third-party channel.
+            pricing_host: Pricing API host override for a third-party channel.
             source_name: Third-party channel name shown in notifications.
             notify_initial: Whether to notify the first successful snapshot.
             new_api_user: Optional new-api-user header for a third-party channel.
             authorization_token: Optional bearer token for a third-party channel.
         """
+        pricing_host = (
+            self._normalize_host(pricing_host) if pricing_host is not None else None
+        )
         previous_ratios: dict[str, float] | None = None
         log_prefix = (
-            f"第三方渠道分组倍率主动通知[{source_name} | {pricing_url}]"
-            if source_name and pricing_url
+            f"第三方渠道分组倍率主动通知[{source_name} | {pricing_host}]"
+            if source_name and pricing_host
             else "分组倍率主动通知"
         )
         while True:
             if new_api_user or authorization_token:
                 data, error = await self._get_pricing_data(
-                    pricing_url, new_api_user, authorization_token
+                    pricing_host, new_api_user, authorization_token
                 )
             else:
-                data, error = await self._get_pricing_data(pricing_url)
+                data, error = await self._get_pricing_data(pricing_host)
             if error:
                 logger.warning(f"{log_prefix}检测失败: {error}")
             else:
@@ -205,7 +209,7 @@ class NewApiDailyRankingPlugin(Star):
                                 lines = [
                                     "📢 第三方渠道分组倍率初始化",
                                     f"渠道: {source_name}",
-                                    f"Pricing: {pricing_url}",
+                                    f"Host 地址: {pricing_host}",
                                 ]
                                 if current_ratios:
                                     for group in sorted(current_ratios):
@@ -218,11 +222,11 @@ class NewApiDailyRankingPlugin(Star):
                             changed_groups = sorted(
                                 set(previous_ratios) | set(current_ratios)
                             )
-                            if source_name and pricing_url:
+                            if source_name and pricing_host:
                                 lines = [
                                     "📢 第三方渠道分组倍率发生变化",
                                     f"渠道: {source_name}",
-                                    f"Pricing: {pricing_url}",
+                                    f"Host 地址: {pricing_host}",
                                 ]
                             else:
                                 lines = ["📢 分组倍率发生变化"]
@@ -380,26 +384,36 @@ class NewApiDailyRankingPlugin(Star):
         lines.append(f"\n💰 签到总额: {total_amount_text}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _normalize_host(host: object) -> str:
+        """Return a host without surrounding whitespace or trailing slashes."""
+        return str(host or "").strip().rstrip("/")
+
+    def _build_api_url(self, host: object, path: str) -> str:
+        """Build an API URL by appending a fixed path to a normalized host."""
+        return f"{self._normalize_host(host)}/{path.lstrip('/')}"
+
     async def _get_pricing_data(
         self,
-        url: str | None = None,
+        host: str | None = None,
         new_api_user: str | None = None,
         authorization_token: str | None = None,
     ) -> tuple[dict | None, str | None]:
         """请求中转站倍率数据。
 
         Args:
-            url: 指定的倍率接口地址；为空时使用主倍率接口配置。
+            host: 指定的倍率 API Host；为空时使用主倍率 Host 配置。
             new_api_user: 指定接口的 new-api-user 请求头。
             authorization_token: 指定接口的 Bearer 令牌。
 
         Returns:
             倍率数据和错误信息；请求成功时错误信息为 None。
         """
-        if url is None:
-            url = self.config.get("pricing_api_url", "https://vibebabo.com/api/pricing")
+        if host is None:
+            host = self.config.get("pricing_api_host", "https://vibebabo.com")
             new_api_user = self.config.get("pricing_new_api_user")
             authorization_token = self.config.get("pricing_authorization_token")
+        url = self._build_api_url(host, "/api/pricing")
 
         headers: dict[str, str] = {}
         new_api_user = str(new_api_user or "").strip()
@@ -446,21 +460,21 @@ class NewApiDailyRankingPlugin(Star):
             raw_channels = []
 
         channels: list[tuple[str, str, str, str]] = []
-        seen_urls: set[str] = set()
+        seen_hosts: set[str] = set()
         for channel in raw_channels:
             if not isinstance(channel, dict):
                 continue
             name = str(channel.get("name") or "").strip()
-            pricing_url = str(channel.get("pricing_api_url") or "").strip()
-            if not name or not pricing_url or pricing_url in seen_urls:
+            pricing_host = self._normalize_host(channel.get("pricing_api_host"))
+            if not name or not pricing_host or pricing_host in seen_hosts:
                 continue
             new_api_user = str(channel.get("new_api_user") or "").strip()
             authorization_token = str(
                 channel.get("authorization_token") or ""
             ).strip()
-            seen_urls.add(pricing_url)
+            seen_hosts.add(pricing_host)
             channels.append(
-                (name, pricing_url, new_api_user, authorization_token)
+                (name, pricing_host, new_api_user, authorization_token)
             )
 
         if channel_name:
@@ -473,18 +487,18 @@ class NewApiDailyRankingPlugin(Star):
             yield event.plain_result("未配置第三方渠道倍率接口")
             return
 
-        for name, pricing_url, new_api_user, authorization_token in channels:
+        for name, pricing_host, new_api_user, authorization_token in channels:
             lines = [
                 "📊 第三方渠道分组倍率",
                 f"渠道: {name}",
-                f"Pricing: {pricing_url}",
+                f"Host 地址: {pricing_host}",
             ]
             if new_api_user or authorization_token:
                 data, error = await self._get_pricing_data(
-                    pricing_url, new_api_user, authorization_token
+                    pricing_host, new_api_user, authorization_token
                 )
             else:
-                data, error = await self._get_pricing_data(pricing_url)
+                data, error = await self._get_pricing_data(pricing_host)
             if error:
                 lines.append(error)
                 yield event.plain_result("\n".join(lines))
@@ -599,10 +613,10 @@ class NewApiDailyRankingPlugin(Star):
             and item.get("billing_mode") != "tiered_expr"
             for item in models
         ):
-            pricing_url = self.config.get(
-                "pricing_api_url", "https://vibebabo.com/api/pricing"
+            pricing_host = self.config.get(
+                "pricing_api_host", "https://vibebabo.com"
             )
-            status_url = urljoin(pricing_url, "/api/status")
+            status_url = self._build_api_url(pricing_host, "/api/status")
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(

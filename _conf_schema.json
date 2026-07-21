@@ -5,11 +5,11 @@
     "hint": "例如 https://docs.vibebabo.com",
     "default": "https://docs.vibebabo.com"
   },
-  "pricing_api_url": {
-    "description": "倍率 API 地址",
+  "pricing_api_host": {
+    "description": "倍率 API Host 地址",
     "type": "string",
-    "hint": "例如 https://vibebabo.com/api/pricing",
-    "default": "https://vibebabo.com/api/pricing"
+    "hint": "例如 https://vibebabo.com",
+    "default": "https://vibebabo.com"
   },
   "pricing_new_api_user": {
     "description": "倍率 API 的 new-api-user 请求头",
@@ -24,7 +24,7 @@
     "default": ""
   },
   "third_party_pricing_channels": {
-    "description": "第三方渠道倍率接口",
+    "description": "第三方渠道倍率 Host",
     "type": "template_list",
     "hint": "可添加多个第三方渠道，每个渠道独立监听",
     "default": [],
@@ -38,10 +38,10 @@
             "hint": "用于在通知中区分第三方渠道",
             "default": ""
           },
-          "pricing_api_url": {
-            "description": "Pricing API 地址",
+          "pricing_api_host": {
+            "description": "Host 地址",
             "type": "string",
-            "hint": "例如 https://example.com/api/pricing",
+            "hint": "例如 https://example.com",
             "default": ""
           },
           "new_api_user": {
