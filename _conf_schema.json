@@ -60,6 +60,12 @@
       }
     }
   },
+  "third_party_show_host": {
+    "description": "第三方倍率消息显示 Host 地址",
+    "type": "bool",
+    "hint": "控制第三方倍率查询和主动通知是否显示 Host 地址",
+    "default": true
+  },
   "default_limit": {
     "description": "默认展示排名数量",
     "type": "int",

@@ -209,8 +209,9 @@ class NewApiDailyRankingPlugin(Star):
                                 lines = [
                                     "📢 第三方渠道分组倍率初始化",
                                     f"渠道: {source_name}",
-                                    f"Host 地址: {pricing_host}",
                                 ]
+                                if self.config.get("third_party_show_host", True):
+                                    lines.append(f"Host 地址: {pricing_host}")
                                 if current_ratios:
                                     for group in sorted(current_ratios):
                                         lines.append(
@@ -226,8 +227,9 @@ class NewApiDailyRankingPlugin(Star):
                                 lines = [
                                     "📢 第三方渠道分组倍率发生变化",
                                     f"渠道: {source_name}",
-                                    f"Host 地址: {pricing_host}",
                                 ]
+                                if self.config.get("third_party_show_host", True):
+                                    lines.append(f"Host 地址: {pricing_host}")
                             else:
                                 lines = ["📢 分组倍率发生变化"]
                             for group in changed_groups:
@@ -491,8 +493,9 @@ class NewApiDailyRankingPlugin(Star):
             lines = [
                 "📊 第三方渠道分组倍率",
                 f"渠道: {name}",
-                f"Host 地址: {pricing_host}",
             ]
+            if self.config.get("third_party_show_host", True):
+                lines.append(f"Host 地址: {pricing_host}")
             if new_api_user or authorization_token:
                 data, error = await self._get_pricing_data(
                     pricing_host, new_api_user, authorization_token

@@ -395,3 +395,64 @@ async def test_terminate_cancels_primary_and_third_party_tasks():
     assert all(task.cancelled() for task in tasks)
     assert plugin._ratio_notify_task is None
     assert plugin._third_party_ratio_notify_tasks == []
+
+
+@pytest.mark.parametrize("show_host", [True, False, None])
+@pytest.mark.asyncio
+async def test_third_party_host_display_in_query_and_notifications(show_host, monkeypatch):
+    context = MagicMock()
+    context.send_message = AsyncMock(return_value=True)
+    config = {
+        "third_party_pricing_channels": [
+            {"name": "Alpha", "pricing_api_host": "https://alpha.example"}
+        ]
+    }
+    if show_host is not None:
+        config["third_party_show_host"] = show_host
+    plugin = NewApiDailyRankingPlugin(context, config)
+    plugin._get_pricing_data = AsyncMock(
+        side_effect=[
+            ({"group_ratio": {"default": 1}}, None),
+            (None, "请求倍率接口失败，状态码: 503"),
+            ({"group_ratio": {"default": 1}}, None),
+            ({"group_ratio": {"default": 2}}, None),
+        ]
+    )
+    event = MagicMock()
+    event.plain_result.side_effect = lambda message: message
+    messages = [result async for result in plugin.query_third_party_pricing(event)]
+    messages += [result async for result in plugin.query_third_party_pricing(event)]
+
+    sleep_calls = 0
+
+    async def stop_after_second_poll(_interval):
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls == 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(asyncio, "sleep", stop_after_second_poll)
+    with pytest.raises(asyncio.CancelledError):
+        await plugin._ratio_notify_loop(
+            60,
+            "third-party",
+            ["100"],
+            [],
+            pricing_host="https://alpha.example",
+            source_name="Alpha",
+            notify_initial=True,
+        )
+    messages += [
+        sent.args[1].get_plain_text() for sent in context.send_message.await_args_list
+    ]
+
+    assert len(messages) == 4
+    assert all("渠道: Alpha" in message for message in messages)
+    assert all(
+        ("Host 地址: https://alpha.example" in message) == (show_host is not False)
+        for message in messages
+    )
+    assert messages[0].endswith("default: 1x")
+    assert messages[1].endswith("请求倍率接口失败，状态码: 503")
+    assert messages[2].endswith("default: 1x")
+    assert messages[3].endswith("default: 1x -> 2x")
